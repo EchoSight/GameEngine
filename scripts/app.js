@@ -131,12 +131,12 @@ const DICE = [
   { sides: 100, label: 'd100', icon: '%' },
 ];
 const MONSTER_PRESETS = [
-  { label: 'Goblin', color: 'hsl(120, 60%, 35%)', hp: 7 },
-  { label: 'Orc', color: 'hsl(30, 70%, 35%)', hp: 15 },
-  { label: 'Dragon', color: 'hsl(0, 70%, 40%)', hp: 195 },
-  { label: 'Skeleton', color: 'hsl(0, 0%, 60%)', hp: 13 },
-  { label: 'Wolf', color: 'hsl(30, 30%, 40%)', hp: 11 },
-  { label: 'Bandit', color: 'hsl(45, 50%, 35%)', hp: 11 },
+  { label: 'Goblin', color: 'hsl(120, 60%, 35%)', hp: 7, ac: 15, speed: 30, proficiencyBonus: 2, abilities: { strength: 8, dexterity: 14, constitution: 10, intelligence: 10, wisdom: 8, charisma: 8 }, armourSource: 'Leather armour + shield' },
+  { label: 'Orc', color: 'hsl(30, 70%, 35%)', hp: 15, ac: 13, speed: 30, proficiencyBonus: 2, abilities: { strength: 16, dexterity: 12, constitution: 16, intelligence: 7, wisdom: 11, charisma: 10 }, armourSource: 'Hide armour' },
+  { label: 'Dragon', color: 'hsl(0, 70%, 40%)', hp: 195, ac: 19, speed: 40, proficiencyBonus: 6, abilities: { strength: 27, dexterity: 10, constitution: 25, intelligence: 16, wisdom: 13, charisma: 21 }, armourSource: 'Natural armour' },
+  { label: 'Skeleton', color: 'hsl(0, 0%, 60%)', hp: 13, ac: 13, speed: 30, proficiencyBonus: 2, abilities: { strength: 10, dexterity: 14, constitution: 15, intelligence: 6, wisdom: 8, charisma: 5 }, armourSource: 'Armour scraps' },
+  { label: 'Wolf', color: 'hsl(30, 30%, 40%)', hp: 11, ac: 13, speed: 40, proficiencyBonus: 2, abilities: { strength: 12, dexterity: 15, constitution: 12, intelligence: 3, wisdom: 12, charisma: 6 }, armourSource: 'Natural armour' },
+  { label: 'Bandit', color: 'hsl(45, 50%, 35%)', hp: 11, ac: 12, speed: 30, proficiencyBonus: 2, abilities: { strength: 11, dexterity: 12, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 }, armourSource: 'Leather armour' },
 ];
 const XP_TABLE = [0, 0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 100000, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000];
 const EQUIPMENT_STAT_FIELDS = [
@@ -147,6 +147,49 @@ const EQUIPMENT_STAT_FIELDS = [
   { key: 'speedBonus', label: 'SPD', type: 'numeric' },
   { key: 'hpBonus', label: 'HP', type: 'numeric' },
 ];
+
+const CONDITION_TEMPLATES = {
+  poisoned: {
+    id: 'poisoned',
+    name: 'Poisoned',
+    description: 'Disadvantage on attack rolls and ability checks.',
+    durationType: 'endOfTurn',
+    durationRemaining: 1,
+    effects: { attackRoll: 'disadvantage', abilityCheck: 'disadvantage' },
+  },
+  stunned: {
+    id: 'stunned',
+    name: 'Stunned',
+    description: 'Cannot take actions or reactions, and movement becomes 0.',
+    durationType: 'endOfTurn',
+    durationRemaining: 1,
+    effects: { actionLocked: true, reactionLocked: true, movementLocked: true },
+  },
+  prone: {
+    id: 'prone',
+    name: 'Prone',
+    description: 'Tracked for future attack-distance modifiers.',
+    durationType: 'manual',
+    durationRemaining: null,
+    effects: { prone: true },
+  },
+  restrained: {
+    id: 'restrained',
+    name: 'Restrained',
+    description: 'Movement becomes 0. Hooks prepared for attack modifiers.',
+    durationType: 'endOfTurn',
+    durationRemaining: 1,
+    effects: { movementLocked: true, restrained: true },
+  },
+  invisible: {
+    id: 'invisible',
+    name: 'Invisible',
+    description: 'Tracked for future visibility interactions.',
+    durationType: 'manual',
+    durationRemaining: null,
+    effects: { invisible: true },
+  },
+};
 
 const state = {
   role: localStorage.getItem(STORAGE_KEYS.role) || 'player',
@@ -208,7 +251,7 @@ function getCharacters() {
 }
 
 function saveCharacters(characters) {
-  writeJson(STORAGE_KEYS.characters, characters);
+  writeJson(STORAGE_KEYS.characters, characters.map((character) => normalizeCharacter(character)));
 }
 
 function getResources() {
@@ -231,11 +274,11 @@ function saveMaps(maps) {
 }
 
 function getMapTokens(mapId) {
-  return readJson(`map-tokens-${mapId}`, []);
+  return readJson(`map-tokens-${mapId}`, []).map(normalizeToken);
 }
 
 function saveMapTokens(mapId, tokens) {
-  writeJson(`map-tokens-${mapId}`, tokens);
+  writeJson(`map-tokens-${mapId}`, tokens.map(normalizeToken));
 }
 
 function getMapObstacles(mapId) {
@@ -273,11 +316,80 @@ function normalizeEquipmentItem(item) {
   };
 }
 
-function normalizeCharacter(character) {
+function abilitiesArrayToObject(abilities = []) {
+  return abilities.reduce((acc, ability) => {
+    acc[String(ability.name || '').toLowerCase()] = Number(ability.score || 10);
+    return acc;
+  }, {});
+}
+
+function abilitiesObjectToArray(abilities = {}) {
+  const lookup = Object.fromEntries(Object.entries(abilities).map(([key, value]) => [key.toLowerCase(), Number(value || 10)]));
+  return [
+    { name: 'STR', score: lookup.strength ?? lookup.str ?? 10 },
+    { name: 'DEX', score: lookup.dexterity ?? lookup.dex ?? 10 },
+    { name: 'CON', score: lookup.constitution ?? lookup.con ?? 10 },
+    { name: 'INT', score: lookup.intelligence ?? lookup.int ?? 10 },
+    { name: 'WIS', score: lookup.wisdom ?? lookup.wis ?? 10 },
+    { name: 'CHA', score: lookup.charisma ?? lookup.cha ?? 10 },
+  ];
+}
+
+function cloneCondition(condition) {
   return {
-    ...character,
-    equipment: (character.equipment || []).map(normalizeEquipmentItem),
+    ...condition,
+    effects: { ...(condition.effects || {}) },
   };
+}
+
+function normalizeCondition(condition) {
+  const template = CONDITION_TEMPLATES[condition?.id] || {};
+  return cloneCondition({
+    id: condition?.id || template.id || uid('condition'),
+    name: condition?.name || template.name || 'Condition',
+    description: condition?.description || template.description || '',
+    durationType: condition?.durationType || template.durationType || 'manual',
+    durationRemaining: condition?.durationRemaining ?? template.durationRemaining ?? null,
+    source: condition?.source || template.source || '',
+    effects: { ...(template.effects || {}), ...(condition?.effects || {}) },
+  });
+}
+
+function getConditionTemplateOptions() {
+  return Object.values(CONDITION_TEMPLATES).map((condition) => normalizeCondition(condition));
+}
+
+function getActionEconomyState(combatant = {}) {
+  return {
+    actionAvailable: combatant.actionAvailable ?? true,
+    bonusActionAvailable: combatant.bonusActionAvailable ?? true,
+    reactionAvailable: combatant.reactionAvailable ?? true,
+    movementRemaining: Number(combatant.movementRemaining ?? combatant.speed ?? 0),
+  };
+}
+
+function normalizeCharacter(character) {
+  const normalized = {
+    ...character,
+    abilities: Array.isArray(character.abilities) ? character.abilities : abilitiesObjectToArray(character.abilities),
+    equipment: (character.equipment || []).map(normalizeEquipmentItem),
+    proficiencyBonus: Number(character.proficiencyBonus ?? Math.max(2, Math.ceil((Number(character.level || 1) - 1) / 4) + 1)),
+    conditions: (character.conditions || []).map(normalizeCondition),
+  };
+  const maxHp = Number(normalized.hitPointsMax ?? normalized.maxHp ?? normalized.hp ?? 1);
+  const currentHp = Number(normalized.hitPointsCurrent ?? normalized.hp ?? maxHp);
+  normalized.maxHp = maxHp;
+  normalized.hp = currentHp;
+  normalized.hitPointsMax = maxHp;
+  normalized.hitPointsCurrent = currentHp;
+  normalized.speed = Number(normalized.speed ?? 30);
+  normalized.abilitiesObject = abilitiesArrayToObject(normalized.abilities);
+  normalized.armourClass = Number(normalized.armourClass ?? normalized.armorClass ?? 0);
+  normalized.armourSource = normalized.armourSource || normalized.armorSource || '';
+  Object.assign(normalized, getActionEconomyState({ ...normalized, speed: normalized.speed }));
+  if (!normalized.armourClass) normalized.armourClass = getEquippedAC({ ...normalized, armourClass: 0 });
+  if (!normalized.armourSource) normalized.armourSource = getArmourSource(normalized);
+  return normalized;
 }
 
 function getEquipmentAbilityBonus(character, abilityName) {
@@ -307,6 +419,10 @@ function getDerivedSpeed(character) {
 
 function syncCharacterVitals(character) {
   character.hp = Math.min(character.hp, getDerivedMaxHp(character));
+  character.hitPointsCurrent = character.hp;
+  character.hitPointsMax = getDerivedMaxHp(character);
+  character.armourClass = getEquippedAC(character);
+  character.armourSource = getArmourSource(character);
 }
 
 function formatModifier(score) {
@@ -319,12 +435,56 @@ function xpForLevel(level) {
 }
 
 function getEquippedAC(character) {
+  if (!Array.isArray(character.equipment) || character.equipment.length === 0) {
+    return Number(character.armourClass ?? character.armorClass ?? 10);
+  }
   const dexMod = getModifier(getEffectiveAbilityScore(character, 'DEX'));
   let base = 10 + dexMod;
   character.equipment.filter((item) => item.equipped).forEach((item) => {
     if (item.acBonus) base += item.acBonus;
   });
   return base;
+}
+
+function getArmourSource(character) {
+  if (character.armourSource) return character.armourSource;
+  const sources = [];
+  if (getModifier(getEffectiveAbilityScore(character, 'DEX'))) sources.push('dexterity');
+  character.equipment.filter((item) => item.equipped && item.acBonus).forEach((item) => {
+    sources.push(item.name.toLowerCase().includes('shield') ? 'shield' : item.name);
+  });
+  return sources.length ? sources.join(', ') : 'natural armour';
+}
+
+function normalizeToken(token) {
+  const abilities = Array.isArray(token.abilities) ? abilitiesArrayToObject(token.abilities) : {
+    strength: Number(token.abilities?.strength ?? token.strength ?? 10),
+    dexterity: Number(token.abilities?.dexterity ?? token.dexterity ?? 10),
+    constitution: Number(token.abilities?.constitution ?? token.constitution ?? 10),
+    intelligence: Number(token.abilities?.intelligence ?? token.intelligence ?? 10),
+    wisdom: Number(token.abilities?.wisdom ?? token.wisdom ?? 10),
+    charisma: Number(token.abilities?.charisma ?? token.charisma ?? 10),
+  };
+  const maxHp = Number(token.hitPointsMax ?? token.maxHp ?? token.hp ?? 1);
+  const currentHp = Number(token.hitPointsCurrent ?? token.hp ?? maxHp);
+  const speed = Number(token.speed ?? 30);
+  return {
+    ...token,
+    id: token.id || uid('token'),
+    name: token.name || token.label || 'Combatant',
+    label: token.label || token.name || 'Combatant',
+    hitPointsCurrent: currentHp,
+    hitPointsMax: maxHp,
+    hp: currentHp,
+    maxHp,
+    armourClass: Number(token.armourClass ?? token.armorClass ?? token.ac ?? 10),
+    armourSource: token.armourSource || token.armorSource || '',
+    speed,
+    proficiencyBonus: Number(token.proficiencyBonus ?? 2),
+    abilities,
+    conditions: (token.conditions || []).map(normalizeCondition),
+    ...getActionEconomyState({ ...token, speed }),
+  };
 }
 
 function getEquippedWeapons(character) {
@@ -434,6 +594,8 @@ function getMapViewState(mapId) {
       combatMovementUsed: 0,
       lastCombatResult: null,
       lastAttackState: { hasAttacked: false, selectedWeaponId: null },
+      combatLog: [],
+      conditionDraft: { mode: 'target', conditionId: 'poisoned', duration: 1 },
     };
   }
   return state.mapUi[mapId];
@@ -443,6 +605,117 @@ function getCurrentMapViewState() {
   const route = getRoute();
   const mapId = route.match(/^\/maps\/([^/]+)$/)?.[1];
   return mapId ? getMapViewState(decodeURIComponent(mapId)) : null;
+}
+
+function hasCondition(target, conditionId) {
+  return (target.conditions || []).some((condition) => condition.id === conditionId);
+}
+
+function applyCondition(target, condition) {
+  const nextCondition = normalizeCondition(condition);
+  const existing = (target.conditions || []).find((entry) => entry.id === nextCondition.id);
+  if (existing) {
+    Object.assign(existing, nextCondition);
+  } else {
+    target.conditions = [...(target.conditions || []), nextCondition];
+  }
+  return target;
+}
+
+function removeCondition(target, conditionId) {
+  target.conditions = (target.conditions || []).filter((condition) => condition.id !== conditionId);
+  return target;
+}
+
+function getConditionEffects(target) {
+  return (target.conditions || []).reduce((acc, condition) => {
+    Object.entries(condition.effects || {}).forEach(([key, value]) => {
+      if (typeof value === 'boolean') acc[key] = acc[key] || value;
+      else acc[key] = value;
+    });
+    return acc;
+  }, {});
+}
+
+function tickConditionDurations(target, timing = 'endOfTurn') {
+  target.conditions = (target.conditions || [])
+    .map((condition) => {
+      if (condition.durationRemaining == null || condition.durationType !== timing) return condition;
+      return normalizeCondition({ ...condition, durationRemaining: condition.durationRemaining - 1 });
+    })
+    .filter((condition) => condition.durationRemaining == null || condition.durationRemaining > 0);
+  return target;
+}
+
+function startTurn(combatant) {
+  combatant.actionAvailable = true;
+  combatant.bonusActionAvailable = true;
+  combatant.reactionAvailable = true;
+  combatant.movementRemaining = Number(combatant.speed || 0);
+  return applyConditionRestrictions(combatant);
+}
+
+function applyConditionRestrictions(combatant) {
+  const effects = getConditionEffects(combatant);
+  if (effects.actionLocked) combatant.actionAvailable = false;
+  if (effects.bonusActionLocked) combatant.bonusActionAvailable = false;
+  if (effects.reactionLocked) combatant.reactionAvailable = false;
+  if (effects.movementLocked) combatant.movementRemaining = 0;
+  return combatant;
+}
+
+function endTurn(combatant) {
+  tickConditionDurations(combatant, 'endOfTurn');
+  return combatant;
+}
+
+function canUseAction(combatant) {
+  return Boolean(combatant?.actionAvailable);
+}
+
+function canUseBonusAction(combatant) {
+  return Boolean(combatant?.bonusActionAvailable);
+}
+
+function canUseReaction(combatant) {
+  return Boolean(combatant?.reactionAvailable);
+}
+
+function canMoveDistance(combatant, distance) {
+  return Number(combatant?.movementRemaining || 0) >= Number(distance || 0);
+}
+
+function consumeAction(combatant, resource = 'action') {
+  if (resource === 'action' && canUseAction(combatant)) combatant.actionAvailable = false;
+  if (resource === 'bonus' && canUseBonusAction(combatant)) combatant.bonusActionAvailable = false;
+  if (resource === 'reaction' && canUseReaction(combatant)) combatant.reactionAvailable = false;
+  return combatant;
+}
+
+function getAttackRollMode(combatant) {
+  const effects = getConditionEffects(combatant);
+  return effects.attackRoll || 'normal';
+}
+
+function rollD20(mode = 'normal') {
+  const first = Math.floor(Math.random() * 20) + 1;
+  const second = Math.floor(Math.random() * 20) + 1;
+  if (mode === 'advantage') return { value: Math.max(first, second), rolls: [first, second], mode };
+  if (mode === 'disadvantage') return { value: Math.min(first, second), rolls: [first, second], mode };
+  return { value: first, rolls: [first], mode: 'normal' };
+}
+
+function formatConditionDuration(condition) {
+  if (condition.durationRemaining == null) return 'Manual';
+  return `${condition.durationRemaining} ${condition.durationRemaining === 1 ? 'turn' : 'turns'} (${condition.durationType})`;
+}
+
+function getCombatantById(mapId, combatantId) {
+  return getMapTokens(mapId).find((token) => token.id === combatantId) || null;
+}
+
+function pushCombatLog(mapState, message, type = 'system') {
+  mapState.combatLog = [{ id: uid('log'), message, type, timestamp: Date.now() }, ...(mapState.combatLog || [])].slice(0, 20);
 }
 
 function hslHealthColor(current, max) {
@@ -1166,6 +1439,7 @@ function renderTokenNode(token, mapState, viewers, obstacles, currentTurnId) {
       ${token.icon ? `<img class="token" style="border-color:${token.color}" src="${token.icon}" alt="${escapeHtml(token.label)}" />` : `<div class="token" style="background:${token.color}">${escapeHtml(token.label.slice(0, 2).toUpperCase())}</div>`}
       ${token.hp !== undefined && token.maxHp !== undefined ? `<div class="token-health"><span style="width:${percent(token.hp, token.maxHp)}%;background:${hslHealthColor(token.hp, token.maxHp)}"></span></div>` : ''}
       <div class="token-label">${escapeHtml(token.label)}</div>
+      <div class="token-meta">AC ${token.armourClass} · ${token.hp}/${token.maxHp} HP</div>
       ${state.role === 'dm' ? `<button class="icon-button icon-button--small delete-token" data-action="remove-token" data-token-id="${token.id}">✕</button>` : ''}
     </div>
   `;
@@ -1176,7 +1450,7 @@ function renderTokenStrip(token, selectedTokenId) {
     <button class="token-pill ${token.id === selectedTokenId ? 'is-selected' : ''}" data-action="select-token" data-token-id="${token.id}">
       <span class="color-dot" style="background:${token.color}"></span>
       <span class="mono">${escapeHtml(token.label)}</span>
-      ${token.hp !== undefined ? `<span class="helper-text">(${token.hp}HP)</span>` : ''}
+      ${token.hp !== undefined ? `<span class="helper-text">(${token.hp}HP · AC ${token.armourClass})</span>` : ''}
     </button>
   `;
 }
@@ -1211,25 +1485,38 @@ function renderInitiativePanel(mapId, tokens, mapState, currentTurnId) {
 function renderCombatPanel(mapId, token, allTokens, mapState) {
   const characters = getCharacters();
   const character = characters.find((entry) => entry.name === token.label);
-  const maxMovement = character ? getDerivedSpeed(character) : 30;
-  const remaining = Math.max(0, maxMovement - mapState.combatMovementUsed);
   const availableWeapons = character && getEquippedWeapons(character).length
     ? getEquippedWeapons(character)
     : [{ id: 'unarmed', name: 'Unarmed Strike', category: 'weapon', damageDie: 1, attackBonus: 0, damageBonus: 0, properties: [] }];
   const selectedWeaponId = mapState.lastAttackState.selectedWeaponId || availableWeapons[0]?.id;
   const enemies = allTokens.filter((entry) => entry.id !== token.id && entry.type !== token.type);
+  const selectedTargetId = mapState.lastAttackState.selectedTargetId || enemies[0]?.id || '';
+  const selectedTarget = enemies.find((enemy) => enemy.id === selectedTargetId) || enemies[0] || null;
   const weaponOptions = availableWeapons.map((weapon) => `<option value="${weapon.id}" ${selectedWeaponId === weapon.id ? 'selected' : ''}>${escapeHtml(weapon.name)} · 1d${weapon.damageDie || 1}${(weapon.damageBonus || 0) > 0 ? `+${weapon.damageBonus}` : ''}</option>`).join('');
+  const conditionOptions = getConditionTemplateOptions().map((condition) => `<option value="${condition.id}" ${mapState.conditionDraft.conditionId === condition.id ? 'selected' : ''}>${escapeHtml(condition.name)}</option>`).join('');
   return `
     <div class="sidebar-panel">
       <div class="section-header">
         <h2 class="section-title" style="margin:0">${escapeHtml(token.label)}'S TURN</h2>
       </div>
       <div class="notice">
-        <div class="inline-stat"><span class="stat-label">Movement</span><span class="mono">${remaining}ft / ${maxMovement}ft</span></div>
-        <div class="progress-track" style="margin-top:0.35rem"><div class="progress-fill" style="width:${Math.max(0, (remaining / maxMovement) * 100)}%;background:var(--secondary)"></div></div>
+        <div class="inline-stat"><span class="stat-label">Armour Class</span><span class="mono">${token.armourClass} ${token.armourSource ? `· ${escapeHtml(token.armourSource)}` : ''}</span></div>
+        <div class="inline-stat"><span class="stat-label">Movement</span><span class="mono">${token.movementRemaining}ft / ${token.speed}ft</span></div>
+        <div class="progress-track" style="margin-top:0.35rem"><div class="progress-fill" style="width:${token.speed > 0 ? Math.max(0, (token.movementRemaining / token.speed) * 100) : 0}%;background:var(--secondary)"></div></div>
+      </div>
+      <div class="combat-resource-grid">
+        ${renderTurnResource('Action', token.actionAvailable)}
+        ${renderTurnResource('Bonus Action', token.bonusActionAvailable)}
+        ${renderTurnResource('Reaction', token.reactionAvailable)}
+        <div class="surface combat-resource-card">
+          <div class="stat-value">${token.movementRemaining}</div>
+          <div class="stat-label">MOVE LEFT</div>
+        </div>
       </div>
       <div class="combat-actions">
-        <button class="button ${mapState.combatMoving ? 'button--secondary' : ''}" data-action="toggle-combat-move" data-map-id="${mapId}" ${remaining <= 0 ? 'disabled' : ''}>${ICONS.move} ${mapState.combatMoving ? 'Click map to move' : `Move (${remaining}ft left)`}</button>
+        <button class="button ${mapState.combatMoving ? 'button--secondary' : ''}" data-action="toggle-combat-move" data-map-id="${mapId}" ${token.movementRemaining <= 0 ? 'disabled' : ''}>${ICONS.move} ${mapState.combatMoving ? 'Click map to move' : `Move (${token.movementRemaining}ft left)`}</button>
+        <button class="button" data-action="use-bonus-action" data-map-id="${mapId}" ${!canUseBonusAction(token) ? 'disabled' : ''}>Bonus Action</button>
+        <button class="button" data-action="use-reaction" data-map-id="${mapId}" ${!canUseReaction(token) ? 'disabled' : ''}>Reaction</button>
         <button class="button" data-action="end-turn" data-map-id="${mapId}">${ICONS.next} End Turn</button>
       </div>
       <div>
@@ -1238,10 +1525,82 @@ function renderCombatPanel(mapId, token, allTokens, mapState) {
       </div>
       <div>
         <label class="stat-label" for="combat-target">TARGET</label>
-        <select id="combat-target" data-map-id="${mapId}">${enemies.map((enemy) => `<option value="${enemy.id}">${escapeHtml(enemy.label)}${enemy.hp !== undefined ? ` · ${enemy.hp}HP` : ''}</option>`).join('')}</select>
+        <select id="combat-target" data-map-id="${mapId}">${enemies.map((enemy) => `<option value="${enemy.id}" ${selectedTargetId === enemy.id ? 'selected' : ''}>${escapeHtml(enemy.label)}${enemy.hp !== undefined ? ` · ${enemy.hp}HP` : ''} · AC ${enemy.armourClass}</option>`).join('')}</select>
       </div>
-      <button class="button button--primary" data-action="perform-attack" data-map-id="${mapId}" ${mapState.lastAttackState.hasAttacked || enemies.length === 0 ? 'disabled' : ''}>${ICONS.attack} ${mapState.lastAttackState.hasAttacked ? 'Already attacked' : 'Attack'}</button>
+      ${selectedTarget ? `<div class="surface combat-target-summary"><div class="inline-stat"><span class="stat-label">Target</span><span class="mono">${escapeHtml(selectedTarget.label)}</span></div><div class="inline-stat"><span class="stat-label">AC</span><span class="mono">${selectedTarget.armourClass}</span></div><div class="inline-stat"><span class="stat-label">Conditions</span><span class="mono">${selectedTarget.conditions.length ? selectedTarget.conditions.map((condition) => escapeHtml(condition.name)).join(', ') : 'None'}</span></div></div>` : ''}
+      <button class="button button--primary" data-action="perform-attack" data-map-id="${mapId}" ${!canUseAction(token) || enemies.length === 0 ? 'disabled' : ''}>${ICONS.attack} ${!canUseAction(token) ? 'Action Spent' : 'Attack'}</button>
+      <div class="surface panel-stack">
+        <div class="section-header">
+          <h3 class="section-title" style="margin:0;font-size:0.9rem">CONDITIONS</h3>
+        </div>
+        <div class="form-row">
+          <div>
+            <label class="stat-label" for="condition-target-mode">TARGET</label>
+            <select id="condition-target-mode" data-action="set-condition-mode">
+              <option value="self" ${mapState.conditionDraft.mode === 'self' ? 'selected' : ''}>Self</option>
+              <option value="target" ${mapState.conditionDraft.mode === 'target' ? 'selected' : ''}>Current Target</option>
+            </select>
+          </div>
+          <div>
+            <label class="stat-label" for="condition-template">CONDITION</label>
+            <select id="condition-template" data-action="set-condition-template">${conditionOptions}</select>
+          </div>
+          <div>
+            <label class="stat-label" for="condition-duration">DURATION</label>
+            <input id="condition-duration" type="number" min="1" value="${mapState.conditionDraft.duration}" data-action="set-condition-duration" />
+          </div>
+        </div>
+        <button class="button button--secondary" data-action="apply-condition" data-map-id="${mapId}" ${mapState.conditionDraft.mode === 'target' && !selectedTarget ? 'disabled' : ''}>Apply Condition</button>
+        ${renderConditionList(token, 'Self', mapId)}
+        ${selectedTarget ? renderConditionList(selectedTarget, 'Target', mapId) : ''}
+      </div>
+      ${renderCombatLog(mapState)}
       ${mapState.lastCombatResult ? renderCombatResult(mapState.lastCombatResult) : ''}
+    </div>
+  `;
+}
+
+function renderTurnResource(label, available) {
+  return `
+    <div class="surface combat-resource-card ${available ? 'is-available' : 'is-used'}">
+      <div class="stat-value">${available ? 'READY' : 'USED'}</div>
+      <div class="stat-label">${label}</div>
+    </div>
+  `;
+}
+
+function renderConditionList(token, heading, mapId) {
+  return `
+    <div class="condition-block">
+      <div class="inline-stat"><span class="stat-label">${heading}</span><span class="mono">${escapeHtml(token.label)}</span></div>
+      <div class="condition-list">
+        ${token.conditions.length
+          ? token.conditions.map((condition) => `
+            <div class="condition-chip">
+              <div>
+                <div class="mono">${escapeHtml(condition.name)}</div>
+                <div class="helper-text">${escapeHtml(condition.description)} · ${escapeHtml(formatConditionDuration(condition))}</div>
+              </div>
+              ${state.role === 'dm' ? `<button class="icon-button icon-button--small" data-action="remove-condition" data-map-id="${mapId}" data-token-id="${token.id}" data-condition-id="${condition.id}">✕</button>` : ''}
+            </div>
+          `).join('')
+          : '<div class="helper-text">No active conditions.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+function renderCombatLog(mapState) {
+  return `
+    <div class="surface panel-stack">
+      <div class="section-header">
+        <h3 class="section-title" style="margin:0;font-size:0.9rem">COMBAT LOG</h3>
+      </div>
+      <div class="combat-log">
+        ${(mapState.combatLog || []).length
+          ? mapState.combatLog.map((entry) => `<div class="combat-log__entry"><span class="combat-log__type">${escapeHtml(entry.type)}</span><span>${escapeHtml(entry.message)}</span></div>`).join('')
+          : '<div class="helper-text">Combat events will appear here.</div>'}
+      </div>
     </div>
   `;
 }
@@ -1250,7 +1609,7 @@ function renderCombatResult(result) {
   return `
     <div class="combat-result">
       <div class="mono" style="color:${result.hit ? 'var(--secondary)' : 'var(--accent)'}">${result.natural20 ? 'CRITICAL HIT!' : result.natural1 ? 'CRITICAL MISS!' : result.hit ? 'HIT!' : 'MISS!'}</div>
-      <div class="helper-text">${escapeHtml(result.weaponName)}: ${result.attackRoll} vs AC ${result.targetAC} (${escapeHtml(result.targetName)})</div>
+      <div class="helper-text">${escapeHtml(result.weaponName)}: ${result.attackRoll} vs AC ${result.targetAC} (${escapeHtml(result.targetName)})${result.attackMode !== 'normal' ? ` · ${escapeHtml(result.attackMode)}` : ''}</div>
       ${result.hit ? `<div class="mono">${result.damageRoll} damage${result.natural20 ? ' (crit!)' : ''}</div>` : ''}
     </div>
   `;
@@ -1530,10 +1889,13 @@ function bindCreateHandlers() {
       xp: 0,
       hp: maxHp,
       maxHp,
-      ac: 10 + getModifier(draft.abilities.find((ability) => ability.name === 'DEX')?.score ?? 10),
+      hitPointsCurrent: maxHp,
+      hitPointsMax: maxHp,
       speed: 30,
+      proficiencyBonus: Math.max(2, Math.ceil((draft.level - 1) / 4) + 1),
       abilities: draft.abilities.map((ability) => ({ ...ability })),
       equipment: draft.equipment.map((item) => ({ ...item })),
+      conditions: [],
       createdAt: new Date().toISOString(),
     };
     syncCharacterVitals(character);
@@ -1581,6 +1943,7 @@ function bindCharacterHandlers(characterId) {
       if (!current) return;
       const step = Number(button.dataset.step);
       current.hp = step > 0 ? Math.min(getDerivedMaxHp(current), current.hp + 1) : Math.max(0, current.hp - 1);
+      current.hitPointsCurrent = current.hp;
       saveCharacters(currentCharacters);
       render();
     });
@@ -1591,6 +1954,7 @@ function bindCharacterHandlers(characterId) {
       const current = currentCharacters.find((entry) => entry.id === characterId);
       if (!current) return;
       current.level = Math.min(20, current.level + 1);
+      current.proficiencyBonus = Math.max(2, Math.ceil((current.level - 1) / 4) + 1);
       syncCharacterVitals(current);
       saveCharacters(currentCharacters);
       render();
@@ -1882,8 +2246,9 @@ function bindMapDetailHandlers(rawMapId) {
     const character = getCharacters().find((entry) => entry.id === button.dataset.characterId);
     if (!character) return;
     const tokens = getMapTokens(mapId);
-    tokens.push({
+    tokens.push(normalizeToken({
       id: uid('token'),
+      name: character.name,
       label: character.name,
       x: 200 + Math.random() * 100,
       y: 200 + Math.random() * 100,
@@ -1891,9 +2256,21 @@ function bindMapDetailHandlers(rawMapId) {
       icon: character.icon,
       type: 'character',
       hp: character.hp,
-      maxHp: character.maxHp,
+      maxHp: getDerivedMaxHp(character),
+      hitPointsCurrent: character.hp,
+      hitPointsMax: getDerivedMaxHp(character),
+      armourClass: getEquippedAC(character),
+      armourSource: getArmourSource(character),
+      speed: getDerivedSpeed(character),
+      proficiencyBonus: character.proficiencyBonus,
+      abilities: abilitiesArrayToObject(character.abilities),
+      conditions: character.conditions || [],
+      actionAvailable: true,
+      bonusActionAvailable: true,
+      reactionAvailable: true,
+      movementRemaining: getDerivedSpeed(character),
       visionRadius: mapState.gridSize * 12,
-    });
+    }));
     saveMapTokens(mapId, tokens);
     mapState.showAddMenu = false;
     render();
@@ -1902,7 +2279,29 @@ function bindMapDetailHandlers(rawMapId) {
     const preset = MONSTER_PRESETS.find((entry) => entry.label === button.dataset.monsterLabel);
     if (!preset) return;
     const tokens = getMapTokens(mapId);
-    tokens.push({ id: uid('token'), label: preset.label, x: 200 + Math.random() * 100, y: 200 + Math.random() * 100, color: preset.color, type: 'monster', hp: preset.hp, maxHp: preset.hp });
+    tokens.push(normalizeToken({
+      id: uid('token'),
+      name: preset.label,
+      label: preset.label,
+      x: 200 + Math.random() * 100,
+      y: 200 + Math.random() * 100,
+      color: preset.color,
+      type: 'monster',
+      hp: preset.hp,
+      maxHp: preset.hp,
+      hitPointsCurrent: preset.hp,
+      hitPointsMax: preset.hp,
+      armourClass: preset.ac,
+      armourSource: preset.armourSource,
+      speed: preset.speed,
+      proficiencyBonus: preset.proficiencyBonus,
+      abilities: preset.abilities,
+      conditions: [],
+      actionAvailable: true,
+      bonusActionAvailable: true,
+      reactionAvailable: true,
+      movementRemaining: preset.speed,
+    }));
     saveMapTokens(mapId, tokens);
     mapState.showAddMenu = false;
     render();
@@ -1947,10 +2346,11 @@ function bindMapDetailHandlers(rawMapId) {
     mapState.currentTurnIndex = 0;
     mapState.combatMovementUsed = 0;
     mapState.combatMoving = false;
-    mapState.lastAttackState = { hasAttacked: false, selectedWeaponId: mapState.lastAttackState.selectedWeaponId };
+    mapState.lastAttackState = { hasAttacked: false, selectedWeaponId: mapState.lastAttackState.selectedWeaponId, selectedTargetId: null };
+    beginCurrentTurn(mapId, mapState);
     render();
   }));
-  app.querySelectorAll('[data-action="next-turn"]').forEach((button) => button.addEventListener('click', () => advanceTurn(mapState)));
+  app.querySelectorAll('[data-action="next-turn"]').forEach((button) => button.addEventListener('click', () => advanceTurn(mapId, mapState)));
   app.querySelectorAll('[data-action="reset-combat"]').forEach((button) => button.addEventListener('click', () => {
     mapState.combatActive = false;
     mapState.currentTurnIndex = 0;
@@ -1958,18 +2358,36 @@ function bindMapDetailHandlers(rawMapId) {
     mapState.combatMovementUsed = 0;
     mapState.combatMoving = false;
     mapState.lastCombatResult = null;
-    mapState.lastAttackState = { hasAttacked: false, selectedWeaponId: null };
+    mapState.lastAttackState = { hasAttacked: false, selectedWeaponId: null, selectedTargetId: null };
+    mapState.combatLog = [];
     render();
   }));
   app.querySelectorAll('[data-action="toggle-combat-move"]').forEach((button) => button.addEventListener('click', () => {
     mapState.combatMoving = !mapState.combatMoving;
     render();
   }));
-  app.querySelectorAll('[data-action="end-turn"]').forEach((button) => button.addEventListener('click', () => advanceTurn(mapState)));
+  app.querySelectorAll('[data-action="use-bonus-action"]').forEach((button) => button.addEventListener('click', () => useTurnResource(mapId, mapState, 'bonus')));
+  app.querySelectorAll('[data-action="use-reaction"]').forEach((button) => button.addEventListener('click', () => useTurnResource(mapId, mapState, 'reaction')));
+  app.querySelectorAll('[data-action="end-turn"]').forEach((button) => button.addEventListener('click', () => advanceTurn(mapId, mapState)));
   document.getElementById('combat-weapon')?.addEventListener('change', (event) => {
     mapState.lastAttackState.selectedWeaponId = event.target.value;
   });
+  document.getElementById('combat-target')?.addEventListener('change', (event) => {
+    mapState.lastAttackState.selectedTargetId = event.target.value;
+    render();
+  });
+  document.getElementById('condition-target-mode')?.addEventListener('change', (event) => {
+    mapState.conditionDraft.mode = event.target.value;
+  });
+  document.getElementById('condition-template')?.addEventListener('change', (event) => {
+    mapState.conditionDraft.conditionId = event.target.value;
+  });
+  document.getElementById('condition-duration')?.addEventListener('input', (event) => {
+    mapState.conditionDraft.duration = Math.max(1, Number(event.target.value || 1));
+  });
   app.querySelectorAll('[data-action="perform-attack"]').forEach((button) => button.addEventListener('click', () => performAttack(mapId, mapState)));
+  app.querySelectorAll('[data-action="apply-condition"]').forEach((button) => button.addEventListener('click', () => applyConditionToCombatant(mapId, mapState)));
+  app.querySelectorAll('[data-action="remove-condition"]').forEach((button) => button.addEventListener('click', () => removeConditionFromCombatant(mapId, button.dataset.tokenId, button.dataset.conditionId, mapState)));
   app.querySelectorAll('[data-action="adjust-token-vision"]').forEach((button) => button.addEventListener('click', () => {
     const tokens = getMapTokens(mapId);
     const token = tokens.find((entry) => entry.id === button.dataset.tokenId);
@@ -2342,41 +2760,62 @@ function moveCurrentCombatToken(mapId, event) {
   if (isMovementBlocked(currentToken.x, currentToken.y, newX, newY, obstacles)) return;
   const cellsMoved = Math.max(Math.abs(newX - currentToken.x), Math.abs(newY - currentToken.y)) / mapState.gridSize;
   const ftMoved = Math.round(cellsMoved) * mapState.ftPerCell;
-  const character = getCharacters().find((entry) => entry.name === currentToken.label);
-  const remaining = (character ? getDerivedSpeed(character) : 30) - mapState.combatMovementUsed;
-  if (ftMoved > remaining) return;
+  if (!canMoveDistance(currentToken, ftMoved)) return;
   currentToken.x = newX;
   currentToken.y = newY;
-  mapState.combatMovementUsed += ftMoved;
+  currentToken.movementRemaining = Math.max(0, currentToken.movementRemaining - ftMoved);
+  mapState.combatMovementUsed = Number(currentToken.speed || 0) - currentToken.movementRemaining;
   saveMapTokens(mapId, tokens);
+  pushCombatLog(mapState, `${currentToken.label} spends ${ftMoved}ft of movement (${currentToken.movementRemaining}ft left).`, 'move');
   render();
 }
 
-function advanceTurn(mapState) {
+function beginCurrentTurn(mapId, mapState) {
+  const tokens = getMapTokens(mapId);
+  const currentTurnId = mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId;
+  const currentToken = tokens.find((entry) => entry.id === currentTurnId);
+  if (!currentToken) return;
+  startTurn(currentToken);
+  mapState.combatMovementUsed = Number(currentToken.speed || 0) - currentToken.movementRemaining;
+  saveMapTokens(mapId, tokens);
+  pushCombatLog(mapState, `Turn started for ${currentToken.label}. Action, bonus action, reaction, and movement reset.`, 'turn');
+}
+
+function advanceTurn(mapId, mapState) {
   if (!mapState.initiativeEntries.length) return;
+  const tokens = getMapTokens(mapId);
+  const currentTurnId = mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId;
+  const currentToken = tokens.find((entry) => entry.id === currentTurnId);
+  if (currentToken) {
+    endTurn(currentToken);
+    pushCombatLog(mapState, `Turn ended for ${currentToken.label}.`, 'turn');
+    saveMapTokens(mapId, tokens);
+  }
   mapState.currentTurnIndex = (mapState.currentTurnIndex + 1) % mapState.initiativeEntries.length;
   mapState.combatMovementUsed = 0;
   mapState.combatMoving = false;
   mapState.lastCombatResult = null;
-  mapState.lastAttackState = { hasAttacked: false, selectedWeaponId: mapState.lastAttackState.selectedWeaponId };
+  mapState.lastAttackState = { hasAttacked: false, selectedWeaponId: mapState.lastAttackState.selectedWeaponId, selectedTargetId: null };
+  beginCurrentTurn(mapId, mapState);
   render();
 }
 
 function performAttack(mapId, mapState) {
-  const targetId = document.getElementById('combat-target')?.value;
+  const targetId = document.getElementById('combat-target')?.value || mapState.lastAttackState.selectedTargetId;
   if (!targetId) return;
   const currentTurnId = mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId;
   const tokens = getMapTokens(mapId);
   const attacker = tokens.find((token) => token.id === currentTurnId);
   const target = tokens.find((token) => token.id === targetId);
   if (!attacker || !target) return;
+  if (!canUseAction(attacker)) return;
   const characters = getCharacters();
   const character = characters.find((entry) => entry.name === attacker.label);
   const availableWeapons = character && getEquippedWeapons(character).length ? getEquippedWeapons(character) : [{ id: 'unarmed', name: 'Unarmed Strike', category: 'weapon', damageDie: 1, attackBonus: 0, damageBonus: 0, properties: [] }];
   const weapon = availableWeapons.find((entry) => entry.id === (mapState.lastAttackState.selectedWeaponId || availableWeapons[0].id)) || availableWeapons[0];
-  const targetCharacter = characters.find((entry) => entry.name === target.label);
-  const targetAC = targetCharacter ? getEquippedAC(targetCharacter) : (target.type === 'monster' ? 10 + Math.floor(Math.random() * 6) : 10);
-  const attackDie = Math.floor(Math.random() * 20) + 1;
+  const targetAC = Number(target.armourClass || 10);
+  const attackRoll = rollD20(getAttackRollMode(attacker));
+  const attackDie = attackRoll.value;
   let attackMod = 0;
   if (character) {
     const strMod = getModifier(getEffectiveAbilityScore(character, 'STR'));
@@ -2385,9 +2824,14 @@ function performAttack(mapId, mapState) {
     else if (weapon.properties?.includes('finesse')) attackMod = Math.max(strMod, dexMod);
     else attackMod = strMod;
   } else {
-    attackMod = Math.floor(Math.random() * 4) + 1;
+    const strMod = getModifier(attacker.abilities.strength || 10);
+    const dexMod = getModifier(attacker.abilities.dexterity || 10);
+    if (weapon.properties?.includes('ranged')) attackMod = dexMod;
+    else if (weapon.properties?.includes('finesse')) attackMod = Math.max(strMod, dexMod);
+    else attackMod = strMod;
   }
-  const attackTotal = attackDie + attackMod + (weapon.attackBonus || 0);
+  const attackBonus = attackMod + Number(weapon.attackBonus || 0) + Number(attacker.proficiencyBonus || 0);
+  const attackTotal = attackDie + attackBonus;
   const natural20 = attackDie === 20;
   const natural1 = attackDie === 1;
   const hit = natural20 || (!natural1 && attackTotal >= targetAC);
@@ -2395,11 +2839,63 @@ function performAttack(mapId, mapState) {
   if (hit) {
     damageRoll = Math.max(1, Math.floor(Math.random() * (weapon.damageDie || 4)) + 1 + attackMod + (weapon.damageBonus || 0));
     if (natural20) damageRoll *= 2;
-    if (typeof target.hp === 'number') target.hp = Math.max(0, target.hp - damageRoll);
+    if (typeof target.hp === 'number') {
+      target.hp = Math.max(0, target.hp - damageRoll);
+      target.hitPointsCurrent = target.hp;
+    }
     saveMapTokens(mapId, tokens);
   }
-  mapState.lastCombatResult = { attackRoll: attackTotal, targetAC, hit, damageRoll, targetName: target.label, natural20, natural1, weaponName: weapon.name };
+  consumeAction(attacker, 'action');
+  saveMapTokens(mapId, tokens);
+  mapState.lastCombatResult = { attackRoll: attackTotal, targetAC, hit, damageRoll, targetName: target.label, natural20, natural1, weaponName: weapon.name, attackMode: attackRoll.mode, attackRolls: attackRoll.rolls };
   mapState.lastAttackState.hasAttacked = true;
+  pushCombatLog(mapState, `${attacker.label} uses an action: ${weapon.name} attack ${attackTotal} vs AC ${targetAC} on ${target.label}${hit ? ` for ${damageRoll} damage` : ' and misses'}.`, 'attack');
+  render();
+}
+
+function useTurnResource(mapId, mapState, resource) {
+  const tokens = getMapTokens(mapId);
+  const currentTurnId = mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId;
+  const currentToken = tokens.find((token) => token.id === currentTurnId);
+  if (!currentToken) return;
+  if ((resource === 'bonus' && !canUseBonusAction(currentToken)) || (resource === 'reaction' && !canUseReaction(currentToken))) return;
+  consumeAction(currentToken, resource);
+  saveMapTokens(mapId, tokens);
+  pushCombatLog(mapState, `${currentToken.label} uses ${resource === 'bonus' ? 'a bonus action' : 'their reaction'}.`, resource === 'bonus' ? 'bonus action' : 'reaction');
+  render();
+}
+
+function applyConditionToCombatant(mapId, mapState) {
+  const tokens = getMapTokens(mapId);
+  const currentTurnId = mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId;
+  const actor = tokens.find((token) => token.id === currentTurnId);
+  const targetId = mapState.conditionDraft.mode === 'self'
+    ? currentTurnId
+    : (document.getElementById('combat-target')?.value || mapState.lastAttackState.selectedTargetId);
+  const target = tokens.find((token) => token.id === targetId);
+  if (!actor || !target) return;
+  const template = CONDITION_TEMPLATES[mapState.conditionDraft.conditionId];
+  if (!template) return;
+  applyCondition(target, {
+    ...template,
+    durationRemaining: template.durationType === 'manual' ? null : Math.max(1, Number(mapState.conditionDraft.duration || template.durationRemaining || 1)),
+    source: actor.label,
+  });
+  if (target.id === currentTurnId) applyConditionRestrictions(target);
+  saveMapTokens(mapId, tokens);
+  pushCombatLog(mapState, `${actor.label} applies ${template.name} to ${target.label}.`, 'condition');
+  render();
+}
+
+function removeConditionFromCombatant(mapId, tokenId, conditionId, mapState) {
+  const tokens = getMapTokens(mapId);
+  const target = tokens.find((token) => token.id === tokenId);
+  if (!target) return;
+  const existing = (target.conditions || []).find((condition) => condition.id === conditionId);
+  removeCondition(target, conditionId);
+  if (mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId === tokenId) applyConditionRestrictions(target);
+  saveMapTokens(mapId, tokens);
+  pushCombatLog(mapState, `${target.label} is no longer affected by ${existing?.name || conditionId}.`, 'condition');
   render();
 }
 
