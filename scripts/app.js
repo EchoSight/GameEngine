@@ -139,6 +139,14 @@ const MONSTER_PRESETS = [
   { label: 'Bandit', color: 'hsl(45, 50%, 35%)', hp: 11 },
 ];
 const XP_TABLE = [0, 0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 100000, 120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000];
+const EQUIPMENT_STAT_FIELDS = [
+  ...ABILITY_NAMES.map((name) => ({ key: name, label: name, type: 'ability' })),
+  { key: 'attackBonus', label: 'ATK', type: 'numeric' },
+  { key: 'damageBonus', label: 'DMG', type: 'numeric' },
+  { key: 'acBonus', label: 'AC', type: 'numeric' },
+  { key: 'speedBonus', label: 'SPD', type: 'numeric' },
+  { key: 'hpBonus', label: 'HP', type: 'numeric' },
+];
 
 const state = {
   role: localStorage.getItem(STORAGE_KEYS.role) || 'player',
@@ -196,7 +204,7 @@ function writeJson(key, value) {
 }
 
 function getCharacters() {
-  return readJson(STORAGE_KEYS.characters, []);
+  return readJson(STORAGE_KEYS.characters, []).map(normalizeCharacter);
 }
 
 function saveCharacters(characters) {
@@ -250,6 +258,57 @@ function getModifier(score) {
   return Math.floor((score - 10) / 2);
 }
 
+function normalizeEquipmentItem(item) {
+  const abilityBonuses = Object.fromEntries(
+    ABILITY_NAMES.map((name) => [name, Number(item?.abilityBonuses?.[name] || 0)]),
+  );
+  return {
+    ...item,
+    attackBonus: Number(item?.attackBonus || 0),
+    damageBonus: Number(item?.damageBonus || 0),
+    acBonus: Number(item?.acBonus || 0),
+    speedBonus: Number(item?.speedBonus || 0),
+    hpBonus: Number(item?.hpBonus || 0),
+    abilityBonuses,
+  };
+}
+
+function normalizeCharacter(character) {
+  return {
+    ...character,
+    equipment: (character.equipment || []).map(normalizeEquipmentItem),
+  };
+}
+
+function getEquipmentAbilityBonus(character, abilityName) {
+  return (character.equipment || [])
+    .filter((item) => item.equipped)
+    .reduce((sum, item) => sum + Number(item.abilityBonuses?.[abilityName] || 0), 0);
+}
+
+function getEffectiveAbilityScore(character, abilityName) {
+  const baseScore = character.abilities.find((ability) => ability.name === abilityName)?.score ?? 10;
+  return baseScore + getEquipmentAbilityBonus(character, abilityName);
+}
+
+function getEquipmentBonus(character, statKey) {
+  return (character.equipment || [])
+    .filter((item) => item.equipped)
+    .reduce((sum, item) => sum + Number(item[statKey] || 0), 0);
+}
+
+function getDerivedMaxHp(character) {
+  return Math.max(1, (character.maxHp || 1) + getEquipmentBonus(character, 'hpBonus'));
+}
+
+function getDerivedSpeed(character) {
+  return Math.max(0, (character.speed || 0) + getEquipmentBonus(character, 'speedBonus'));
+}
+
+function syncCharacterVitals(character) {
+  character.hp = Math.min(character.hp, getDerivedMaxHp(character));
+}
+
 function formatModifier(score) {
   const modifier = getModifier(score);
   return modifier >= 0 ? `+${modifier}` : `${modifier}`;
@@ -260,10 +319,9 @@ function xpForLevel(level) {
 }
 
 function getEquippedAC(character) {
-  const dex = character.abilities.find((ability) => ability.name === 'DEX');
-  const dexMod = dex ? getModifier(dex.score) : 0;
+  const dexMod = getModifier(getEffectiveAbilityScore(character, 'DEX'));
   let base = 10 + dexMod;
-  character.equipment.filter((item) => item.equipped && item.category === 'armor').forEach((item) => {
+  character.equipment.filter((item) => item.equipped).forEach((item) => {
     if (item.acBonus) base += item.acBonus;
   });
   return base;
@@ -507,7 +565,10 @@ function renderRosterPage() {
 }
 
 function renderCharacterCard(character) {
-  const hpPct = percent(character.hp, character.maxHp);
+  const maxHp = getDerivedMaxHp(character);
+  const hpPct = percent(character.hp, maxHp);
+  const ac = getEquippedAC(character);
+  const speed = getDerivedSpeed(character);
   return `
     <a class="card" href="#/character/${encodeURIComponent(character.id)}">
       <div class="character-card__head">
@@ -519,18 +580,18 @@ function renderCharacterCard(character) {
           </div>
         </div>
         <div style="text-align:right">
-          <div class="big-number" style="font-size:1.8rem">${character.ac}</div>
+          <div class="big-number" style="font-size:1.8rem">${ac}</div>
           <div class="stat-label">AC</div>
         </div>
       </div>
       <div class="hp-bar">
-        <div class="row-between"><span class="stat-label">HIT POINTS</span><span class="hp-numbers"><span>${character.hp}</span><span style="color:var(--muted-foreground)">/${character.maxHp}</span></span></div>
-        <div class="hp-track"><div class="hp-fill" style="width:${hpPct}%;background:${hslHealthColor(character.hp, character.maxHp)}"></div></div>
+        <div class="row-between"><span class="stat-label">HIT POINTS</span><span class="hp-numbers"><span>${Math.min(character.hp, maxHp)}</span><span style="color:var(--muted-foreground)">/${maxHp}</span></span></div>
+        <div class="hp-track"><div class="hp-fill" style="width:${hpPct}%;background:${hslHealthColor(character.hp, maxHp)}"></div></div>
       </div>
       <div class="stats-grid" style="margin-top:0.9rem">
-        <div class="surface stat-card"><div class="stat-value" style="font-size:1.2rem">${formatModifier(character.abilities.find((a) => a.name === 'STR')?.score ?? 10)}</div><div class="stat-label">STR</div></div>
-        <div class="surface stat-card"><div class="stat-value" style="font-size:1.2rem">${formatModifier(character.abilities.find((a) => a.name === 'DEX')?.score ?? 10)}</div><div class="stat-label">DEX</div></div>
-        <div class="surface stat-card"><div class="stat-value" style="font-size:1.2rem">${character.speed}</div><div class="stat-label">SPD</div></div>
+        <div class="surface stat-card"><div class="stat-value" style="font-size:1.2rem">${formatModifier(getEffectiveAbilityScore(character, 'STR'))}</div><div class="stat-label">STR</div></div>
+        <div class="surface stat-card"><div class="stat-value" style="font-size:1.2rem">${formatModifier(getEffectiveAbilityScore(character, 'DEX'))}</div><div class="stat-label">DEX</div></div>
+        <div class="surface stat-card"><div class="stat-value" style="font-size:1.2rem">${speed}</div><div class="stat-label">SPD</div></div>
       </div>
     </a>
   `;
@@ -554,8 +615,11 @@ function renderCreatePage() {
   state.view.createDraft = draft;
   const conMod = getModifier(draft.abilities.find((ability) => ability.name === 'CON')?.score ?? 10);
   const hitDie = CLASS_HIT_DIE[draft.dndClass];
-  const maxHp = Math.max(1, hitDie + conMod + (draft.level - 1) * (Math.floor(hitDie / 2) + 1 + conMod));
-  const baseAc = 10 + getModifier(draft.abilities.find((ability) => ability.name === 'DEX')?.score ?? 10);
+  const baseMaxHp = Math.max(1, hitDie + conMod + (draft.level - 1) * (Math.floor(hitDie / 2) + 1 + conMod));
+  const draftCharacter = normalizeCharacter({ abilities: draft.abilities, equipment: draft.equipment, maxHp: baseMaxHp, speed: 30 });
+  const maxHp = getDerivedMaxHp(draftCharacter);
+  const baseAc = getEquippedAC(draftCharacter);
+  const speed = getDerivedSpeed(draftCharacter);
   return `
     <section class="page-body">
       <div class="page-header">
@@ -596,6 +660,7 @@ function renderCreatePage() {
           <div class="stats-grid">
             <div class="surface inline-stat"><span class="stat-label">MAX HP</span><span class="big-number" style="font-size:1.3rem">${maxHp}</span></div>
             <div class="surface inline-stat"><span class="stat-label">AC</span><span class="big-number" style="font-size:1.3rem">${baseAc}</span></div>
+            <div class="surface inline-stat"><span class="stat-label">SPEED</span><span class="big-number" style="font-size:1.3rem">${speed}</span></div>
             <div class="surface inline-stat"><span class="stat-label">HIT DIE</span><span class="big-number" style="font-size:1.3rem">d${hitDie}</span></div>
           </div>
         </section>
@@ -603,7 +668,7 @@ function renderCreatePage() {
         <section class="section">
           <h2 class="section-title">ABILITY SCORES</h2>
           <div class="ability-grid">
-            ${draft.abilities.map((ability, index) => renderAbilityCard(ability, true, `create-ability`, index)).join('')}
+            ${draft.abilities.map((ability, index) => renderAbilityCard(ability, true, `create-ability`, index, getEffectiveAbilityScore(draftCharacter, ability.name))).join('')}
           </div>
         </section>
 
@@ -621,14 +686,15 @@ function renderCreatePage() {
   `;
 }
 
-function renderAbilityCard(ability, editable, actionPrefix, index) {
+function renderAbilityCard(ability, editable, actionPrefix, index, effectiveScore = ability.score) {
+  const bonus = effectiveScore - ability.score;
   return `
     <div class="surface stat-card">
       <div class="stat-label">${ability.name}</div>
-      <div class="stat-value">${formatModifier(ability.score)}</div>
+      <div class="stat-value">${formatModifier(effectiveScore)}</div>
       <div class="adjusters">
         ${editable ? `<button class="stat-adjust" data-action="${actionPrefix}" data-index="${index}" data-step="-1" type="button">−</button>` : ''}
-        <span class="mono">${ability.score}</span>
+        <span class="mono">${effectiveScore}${bonus ? ` <span class="item-meta">(${bonus >= 0 ? '+' : ''}${bonus})</span>` : ''}</span>
         ${editable ? `<button class="stat-adjust" data-action="${actionPrefix}" data-index="${index}" data-step="1" type="button">+</button>` : ''}
       </div>
     </div>
@@ -648,6 +714,17 @@ function renderEquipmentList(equipment, editable, scope) {
 }
 
 function renderEquipmentRow(item, editable, scope) {
+  const statSummary = [];
+  if (item.category === 'weapon' && (item.attackBonus || item.damageBonus)) {
+    statSummary.push(`ATK ${item.attackBonus >= 0 ? '+' : ''}${item.attackBonus} · DMG ${item.damageBonus >= 0 ? '+' : ''}${item.damageBonus}`);
+  }
+  if (item.acBonus) statSummary.push(`AC ${item.acBonus >= 0 ? '+' : ''}${item.acBonus}`);
+  ABILITY_NAMES.forEach((name) => {
+    const value = Number(item.abilityBonuses?.[name] || 0);
+    if (value) statSummary.push(`${name} ${value >= 0 ? '+' : ''}${value}`);
+  });
+  if (item.speedBonus) statSummary.push(`SPD ${item.speedBonus >= 0 ? '+' : ''}${item.speedBonus}`);
+  if (item.hpBonus) statSummary.push(`HP ${item.hpBonus >= 0 ? '+' : ''}${item.hpBonus}`);
   return `
     <div class="item-row">
       <div class="item-main">
@@ -656,6 +733,24 @@ function renderEquipmentRow(item, editable, scope) {
           ${item.acBonus && item.category === 'armor' ? `<span class="item-meta">(+${item.acBonus} AC)</span>` : ''}
         </div>
         <div class="item-meta">${item.category} · ${item.weight} lb ${item.equipped ? '· equipped' : ''}</div>
+        ${statSummary.length ? `<div class="equipment-stat-summary">${statSummary.map((entry) => `<span class="equipment-stat-pill">${entry}</span>`).join('')}</div>` : ''}
+        ${editable
+          ? `<div class="equipment-stat-editor">
+              ${EQUIPMENT_STAT_FIELDS.map((field) => {
+                const value = field.type === 'ability' ? Number(item.abilityBonuses?.[field.key] || 0) : Number(item[field.key] || 0);
+                return `
+                  <div class="equipment-stat-control">
+                    <span class="stat-label">${field.label}</span>
+                    <div class="inline-actions">
+                      <button class="icon-button icon-button--small" data-action="adjust-equipment-stat" data-scope="${scope}" data-id="${item.id}" data-stat="${field.key}" data-step="-1" type="button">−</button>
+                      <span class="mono">${value >= 0 ? '+' : ''}${value}</span>
+                      <button class="icon-button icon-button--small" data-action="adjust-equipment-stat" data-scope="${scope}" data-id="${item.id}" data-stat="${field.key}" data-step="1" type="button">+</button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>`
+          : ''}
       </div>
       ${
         editable
@@ -678,6 +773,9 @@ function renderCharacterPage(characterId) {
   const editing = state.view.characterEditing;
   const xpNext = xpForLevel(character.level + 1);
   const progress = xpNext > 0 ? Math.min(100, (character.xp / xpNext) * 100) : 100;
+  const ac = getEquippedAC(character);
+  const speed = getDerivedSpeed(character);
+  const maxHp = getDerivedMaxHp(character);
   return `
     <section class="page-body">
       <div class="character-header" style="margin-bottom:0.75rem">
@@ -705,15 +803,15 @@ function renderCharacterPage(characterId) {
         <section>
           <h2 class="section-title">ABILITIES</h2>
           <div class="ability-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-            ${character.abilities.map((ability, index) => renderAbilityCard(ability, editing, 'character-ability', index)).join('')}
+            ${character.abilities.map((ability, index) => renderAbilityCard(ability, editing, 'character-ability', index, getEffectiveAbilityScore(character, ability.name))).join('')}
           </div>
         </section>
         <section>
           <h2 class="section-title">COMBAT</h2>
           <div class="surface">
             <div class="hp-bar">
-              <div class="row-between"><span class="stat-label">HIT POINTS</span><span class="hp-numbers"><span>${character.hp}</span><span style="color:var(--muted-foreground)">/${character.maxHp}</span></span></div>
-              <div class="hp-track"><div class="hp-fill" style="width:${percent(character.hp, character.maxHp)}%;background:${hslHealthColor(character.hp, character.maxHp)}"></div></div>
+              <div class="row-between"><span class="stat-label">HIT POINTS</span><span class="hp-numbers"><span>${Math.min(character.hp, maxHp)}</span><span style="color:var(--muted-foreground)">/${maxHp}</span></span></div>
+              <div class="hp-track"><div class="hp-fill" style="width:${percent(character.hp, maxHp)}%;background:${hslHealthColor(character.hp, maxHp)}"></div></div>
             </div>
             ${
               editing
@@ -722,8 +820,8 @@ function renderCharacterPage(characterId) {
             }
           </div>
           <div class="stats-grid" style="margin-top:0.5rem">
-            <div class="surface stat-card"><div class="stat-value">${character.ac}</div><div class="stat-label">AC</div></div>
-            <div class="surface stat-card"><div class="stat-value">${character.speed}</div><div class="stat-label">SPEED</div></div>
+            <div class="surface stat-card"><div class="stat-value">${ac}</div><div class="stat-label">AC</div></div>
+            <div class="surface stat-card"><div class="stat-value">${speed}</div><div class="stat-label">SPEED</div></div>
             <div class="surface stat-card"><div class="stat-value">${character.level}</div><div class="stat-label">LEVEL</div></div>
           </div>
         </section>
@@ -1113,7 +1211,7 @@ function renderInitiativePanel(mapId, tokens, mapState, currentTurnId) {
 function renderCombatPanel(mapId, token, allTokens, mapState) {
   const characters = getCharacters();
   const character = characters.find((entry) => entry.name === token.label);
-  const maxMovement = character?.speed || 30;
+  const maxMovement = character ? getDerivedSpeed(character) : 30;
   const remaining = Math.max(0, maxMovement - mapState.combatMovementUsed);
   const availableWeapons = character && getEquippedWeapons(character).length
     ? getEquippedWeapons(character)
@@ -1355,6 +1453,21 @@ function bindCommonHandlers() {
 function bindCreateHandlers() {
   const form = document.getElementById('create-character-form');
   const draft = state.view.createDraft;
+  const updateDraftEquipmentStat = (id, statKey, step) => {
+    draft.equipment = draft.equipment.map((item) => {
+      if (item.id !== id) return item;
+      if (ABILITY_NAMES.includes(statKey)) {
+        return {
+          ...item,
+          abilityBonuses: {
+            ...item.abilityBonuses,
+            [statKey]: Number(item.abilityBonuses?.[statKey] || 0) + step,
+          },
+        };
+      }
+      return { ...item, [statKey]: Number(item[statKey] || 0) + step };
+    });
+  };
   document.getElementById('create-name')?.addEventListener('input', (event) => {
     draft.name = event.target.value;
     render();
@@ -1396,6 +1509,12 @@ function bindCreateHandlers() {
       render();
     });
   });
+  app.querySelectorAll('[data-action="adjust-equipment-stat"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      updateDraftEquipmentStat(button.dataset.id, button.dataset.stat, Number(button.dataset.step));
+      render();
+    });
+  });
   form?.addEventListener('submit', (event) => {
     event.preventDefault();
     if (!draft.name.trim()) return;
@@ -1417,6 +1536,7 @@ function bindCreateHandlers() {
       equipment: draft.equipment.map((item) => ({ ...item })),
       createdAt: new Date().toISOString(),
     };
+    syncCharacterVitals(character);
     const characters = getCharacters();
     characters.push(character);
     saveCharacters(characters);
@@ -1449,7 +1569,7 @@ function bindCharacterHandlers(characterId) {
       const index = Number(button.dataset.index);
       const step = Number(button.dataset.step);
       current.abilities[index].score = Math.max(1, Math.min(20, current.abilities[index].score + step));
-      current.ac = getEquippedAC(current);
+      syncCharacterVitals(current);
       saveCharacters(currentCharacters);
       render();
     });
@@ -1460,7 +1580,7 @@ function bindCharacterHandlers(characterId) {
       const current = currentCharacters.find((entry) => entry.id === characterId);
       if (!current) return;
       const step = Number(button.dataset.step);
-      current.hp = step > 0 ? Math.min(current.maxHp, current.hp + 1) : Math.max(0, current.hp - 1);
+      current.hp = step > 0 ? Math.min(getDerivedMaxHp(current), current.hp + 1) : Math.max(0, current.hp - 1);
       saveCharacters(currentCharacters);
       render();
     });
@@ -1471,6 +1591,7 @@ function bindCharacterHandlers(characterId) {
       const current = currentCharacters.find((entry) => entry.id === characterId);
       if (!current) return;
       current.level = Math.min(20, current.level + 1);
+      syncCharacterVitals(current);
       saveCharacters(currentCharacters);
       render();
     });
@@ -1484,7 +1605,7 @@ function bindCharacterHandlers(characterId) {
       const current = currentCharacters.find((entry) => entry.id === characterId);
       if (!current) return;
       current.equipment = current.equipment.map((item) => item.id === button.dataset.id ? { ...item, equipped: !item.equipped } : item);
-      current.ac = getEquippedAC(current);
+      syncCharacterVitals(current);
       saveCharacters(currentCharacters);
       render();
     });
@@ -1495,7 +1616,33 @@ function bindCharacterHandlers(characterId) {
       const current = currentCharacters.find((entry) => entry.id === characterId);
       if (!current) return;
       current.equipment = current.equipment.filter((item) => item.id !== button.dataset.id);
-      current.ac = getEquippedAC(current);
+      syncCharacterVitals(current);
+      saveCharacters(currentCharacters);
+      render();
+    });
+  });
+  app.querySelectorAll('[data-action="adjust-equipment-stat"]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const currentCharacters = getCharacters();
+      const current = currentCharacters.find((entry) => entry.id === characterId);
+      if (!current) return;
+      current.equipment = current.equipment.map((item) => {
+        if (item.id !== button.dataset.id) return item;
+        if (ABILITY_NAMES.includes(button.dataset.stat)) {
+          return {
+            ...item,
+            abilityBonuses: {
+              ...item.abilityBonuses,
+              [button.dataset.stat]: Number(item.abilityBonuses?.[button.dataset.stat] || 0) + Number(button.dataset.step),
+            },
+          };
+        }
+        return {
+          ...item,
+          [button.dataset.stat]: Number(item[button.dataset.stat] || 0) + Number(button.dataset.step),
+        };
+      });
+      syncCharacterVitals(current);
       saveCharacters(currentCharacters);
       render();
     });
@@ -1973,7 +2120,7 @@ function bindDrawerHandlers() {
   document.querySelectorAll('[data-action="add-equipment-item"]').forEach((button) => button.addEventListener('click', () => {
     const item = EQUIPMENT_CATALOG.find((entry) => entry.name === button.dataset.name);
     if (!item) return;
-    const equipmentItem = { ...item, id: uid('eq'), equipped: false };
+    const equipmentItem = normalizeEquipmentItem({ ...item, id: uid('eq'), equipped: false });
     if (button.dataset.mode === 'create') {
       state.view.createDraft.equipment = [...state.view.createDraft.equipment, equipmentItem];
     } else if (button.dataset.mode === 'character') {
@@ -1981,7 +2128,7 @@ function bindDrawerHandlers() {
       const character = characters.find((entry) => entry.id === state.view.selectedCharacterId);
       if (!character) return;
       character.equipment = [...character.equipment, equipmentItem];
-      character.ac = getEquippedAC(character);
+      syncCharacterVitals(character);
       saveCharacters(characters);
     }
     state.drawer = null;
@@ -2196,7 +2343,7 @@ function moveCurrentCombatToken(mapId, event) {
   const cellsMoved = Math.max(Math.abs(newX - currentToken.x), Math.abs(newY - currentToken.y)) / mapState.gridSize;
   const ftMoved = Math.round(cellsMoved) * mapState.ftPerCell;
   const character = getCharacters().find((entry) => entry.name === currentToken.label);
-  const remaining = (character?.speed || 30) - mapState.combatMovementUsed;
+  const remaining = (character ? getDerivedSpeed(character) : 30) - mapState.combatMovementUsed;
   if (ftMoved > remaining) return;
   currentToken.x = newX;
   currentToken.y = newY;
@@ -2232,10 +2379,8 @@ function performAttack(mapId, mapState) {
   const attackDie = Math.floor(Math.random() * 20) + 1;
   let attackMod = 0;
   if (character) {
-    const str = character.abilities.find((ability) => ability.name === 'STR');
-    const dex = character.abilities.find((ability) => ability.name === 'DEX');
-    const strMod = str ? getModifier(str.score) : 0;
-    const dexMod = dex ? getModifier(dex.score) : 0;
+    const strMod = getModifier(getEffectiveAbilityScore(character, 'STR'));
+    const dexMod = getModifier(getEffectiveAbilityScore(character, 'DEX'));
     if (weapon.properties?.includes('ranged')) attackMod = dexMod;
     else if (weapon.properties?.includes('finesse')) attackMod = Math.max(strMod, dexMod);
     else attackMod = strMod;
