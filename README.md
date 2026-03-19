@@ -18,6 +18,8 @@ npm install
 npm run dev
 ```
 
+This project now uses plain JavaScript source files and standard `.js` config files throughout the repo.
+
 ## Production build
 
 ```sh
@@ -25,7 +27,7 @@ npm run build
 npm run preview
 ```
 
-The app now uses hash-based routing and a relative Vite base path, so the generated `dist/` folder can be deployed directly to GitHub Pages or any other static host.
+The app uses hash-based routing and a relative Vite base path, so the generated `dist/` folder can be deployed directly to GitHub Pages or any other static host.
 
 ## Deploying to GitHub Pages
 
