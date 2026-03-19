@@ -238,6 +238,14 @@ function saveMapObstacles(mapId, obstacles) {
   writeJson(`map-obstacles-${mapId}`, obstacles);
 }
 
+function getMapFog(mapId) {
+  return readJson(`map-fog-${mapId}`, []);
+}
+
+function saveMapFog(mapId, fogCells) {
+  writeJson(`map-fog-${mapId}`, fogCells);
+}
+
 function getModifier(score) {
   return Math.floor((score - 10) / 2);
 }
@@ -356,6 +364,9 @@ function getMapViewState(mapId) {
       showAddMenu: false,
       selectedObstacleId: null,
       obstacleTool: null,
+      fogTool: null,
+      drawingFog: false,
+      lastFogCellKey: null,
       imgWidth: 800,
       imgHeight: 600,
       initiativeEntries: [],
@@ -964,6 +975,7 @@ function renderMapDetailPage(map) {
   const mapState = getMapViewState(map.id);
   const tokens = getMapTokens(map.id);
   const obstacles = getMapObstacles(map.id);
+  const fogCells = getMapFog(map.id);
   const selectedToken = tokens.find((token) => token.id === mapState.selectedTokenId) || null;
   const currentTurnId = mapState.combatActive && mapState.initiativeEntries.length ? mapState.initiativeEntries[mapState.currentTurnIndex]?.tokenId : null;
   const currentTurnToken = tokens.find((token) => token.id === currentTurnId) || null;
@@ -980,7 +992,7 @@ function renderMapDetailPage(map) {
       <div class="map-layout">
         <div class="map-stage">
           ${renderMapToolbar(map, mapState)}
-          <div class="canvas-wrap ${mapState.obstacleTool === 'line' || mapState.obstacleTool === 'rect' || mapState.combatMoving ? 'is-crosshair' : ''}" data-map-wrap="${map.id}">
+          <div class="canvas-wrap ${mapState.obstacleTool === 'line' || mapState.obstacleTool === 'rect' || mapState.fogTool || mapState.combatMoving ? 'is-crosshair' : ''}" data-map-wrap="${map.id}">
             <div class="canvas-scene" id="canvas-scene" style="transform:translate(${mapState.panX}px, ${mapState.panY}px) scale(${mapState.zoom})">
               <img class="canvas-map" id="map-image" src="${map.image}" alt="${escapeHtml(map.name)}" />
               <svg class="grid-overlay" id="grid-overlay"></svg>
@@ -997,6 +1009,7 @@ function renderMapDetailPage(map) {
           ${renderInitiativePanel(map.id, tokens, mapState, currentTurnId)}
           ${mapState.combatActive && currentTurnToken ? renderCombatPanel(map.id, currentTurnToken, tokens, mapState) : ''}
           ${state.role === 'dm' && selectedToken && selectedToken.type === 'character' ? renderVisionPanel(map.id, selectedToken, mapState) : ''}
+          ${state.role === 'dm' ? renderFogInfo(fogCells, mapState) : ''}
           ${state.role === 'dm' ? renderObstacleInfo(obstacles) : ''}
         </aside>
       </div>
@@ -1024,6 +1037,8 @@ function renderMapToolbar(map, mapState) {
           <button class="toolbar-button ${mapState.obstacleTool === 'select' ? 'is-active' : ''}" data-action="set-obstacle-tool" data-map-id="${map.id}" data-tool="select">${ICONS.pointer}</button>
           <button class="toolbar-button ${mapState.obstacleTool === 'line' ? 'is-active' : ''}" data-action="set-obstacle-tool" data-map-id="${map.id}" data-tool="line">${ICONS.line}</button>
           <button class="toolbar-button ${mapState.obstacleTool === 'rect' ? 'is-active' : ''}" data-action="set-obstacle-tool" data-map-id="${map.id}" data-tool="rect">${ICONS.rect}</button>
+          <button class="toolbar-button ${mapState.fogTool === 'paint' ? 'is-active' : ''}" data-action="set-fog-tool" data-map-id="${map.id}" data-tool="paint">Fog +</button>
+          <button class="toolbar-button ${mapState.fogTool === 'erase' ? 'is-active' : ''}" data-action="set-fog-tool" data-map-id="${map.id}" data-tool="erase">Fog −</button>
           <button class="toolbar-button ${mapState.showPlayerPreview ? 'is-active' : ''}" data-action="toggle-player-preview" data-map-id="${map.id}">${ICONS.player} Player View</button>
         </div>
         <div class="toolbar-group" style="margin-left:auto;position:relative">
@@ -1153,6 +1168,18 @@ function renderVisionPanel(mapId, token, mapState) {
         <span class="mono">${radiusCells * mapState.ftPerCell}ft</span>
         <button class="icon-button" data-action="adjust-token-vision" data-map-id="${mapId}" data-token-id="${token.id}" data-step="2">+</button>
       </div>
+    </div>
+  `;
+}
+
+function renderFogInfo(fogCells, mapState) {
+  const mode = mapState.fogTool === 'paint' ? 'Painting fog blocks' : mapState.fogTool === 'erase' ? 'Erasing fog blocks' : 'Fog edit tools idle';
+  return `
+    <div class="sidebar-panel">
+      <h2 class="section-title">FOG OF WAR</h2>
+      <p class="helper-text">${fogCells.length} stored fog block${fogCells.length === 1 ? '' : 's'}.</p>
+      <p class="helper-text">Use <strong>Fog +</strong> to add hidden cells and <strong>Fog −</strong> to delete them by dragging across the map.</p>
+      <p class="helper-text">${mode}${mapState.showPlayerPreview ? ' · Player view preview enabled.' : ''}</p>
     </div>
   `;
 }
@@ -1638,6 +1665,7 @@ function bindMapsHandlers() {
       saveMaps(getMaps().filter((map) => map.id !== mapId));
       localStorage.removeItem(`map-tokens-${mapId}`);
       localStorage.removeItem(`map-obstacles-${mapId}`);
+      localStorage.removeItem(`map-fog-${mapId}`);
       delete state.mapUi[mapId];
       render();
     });
@@ -1687,6 +1715,12 @@ function bindMapDetailHandlers(rawMapId) {
   }));
   app.querySelectorAll('[data-action="set-obstacle-tool"]').forEach((button) => button.addEventListener('click', () => {
     mapState.obstacleTool = mapState.obstacleTool === button.dataset.tool ? null : button.dataset.tool;
+    if (mapState.obstacleTool) mapState.fogTool = null;
+    render();
+  }));
+  app.querySelectorAll('[data-action="set-fog-tool"]').forEach((button) => button.addEventListener('click', () => {
+    mapState.fogTool = mapState.fogTool === button.dataset.tool ? null : button.dataset.tool;
+    if (mapState.fogTool) mapState.obstacleTool = null;
     render();
   }));
   app.querySelectorAll('[data-action="toggle-player-preview"]').forEach((button) => button.addEventListener('click', () => {
@@ -1898,7 +1932,9 @@ function renderObstacleSvg(mapId, mapState, obstacles) {
 }
 
 function renderFog(mapId, mapState) {
-  if (state.role === 'dm' && !mapState.showPlayerPreview) return '';
+  const fogCells = new Set(getMapFog(mapId));
+  const hideByVision = state.role !== 'dm' || mapState.showPlayerPreview;
+  if (!hideByVision && !fogCells.size) return '';
   const width = mapState.imgWidth;
   const height = mapState.imgHeight;
   const gridSize = mapState.gridSize;
@@ -1912,8 +1948,13 @@ function renderFog(mapId, mapState) {
     for (let column = 0; column < cols; column += 1) {
       const x = column * gridSize;
       const y = row * gridSize;
+      const fogKey = `${column}:${row}`;
+      const hiddenByFog = fogCells.has(fogKey);
       const visible = isCellVisible(column, row, gridSize, viewers, obstacles);
-      if (!visible) cells += `<div style="position:absolute;left:${x}px;top:${y}px;width:${gridSize}px;height:${gridSize}px;background:${state.role === 'dm' ? 'rgba(10,10,15,0.6)' : 'rgba(10,10,15,0.95)'}"></div>`;
+      if (!hiddenByFog && (!hideByVision || visible)) continue;
+      let background = state.role === 'dm' ? 'rgba(10,10,15,0.6)' : 'rgba(10,10,15,0.95)';
+      if (hiddenByFog && state.role === 'dm' && !mapState.showPlayerPreview) background = 'rgba(10,10,15,0.35)';
+      cells += `<div style="position:absolute;left:${x}px;top:${y}px;width:${gridSize}px;height:${gridSize}px;background:${background}"></div>`;
     }
   }
   return cells;
@@ -1966,6 +2007,31 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function getFogCellKey(point, mapState) {
+  if (point.x < 0 || point.y < 0 || point.x >= mapState.imgWidth || point.y >= mapState.imgHeight) return null;
+  const column = Math.floor(point.x / mapState.gridSize);
+  const row = Math.floor(point.y / mapState.gridSize);
+  return `${column}:${row}`;
+}
+
+function applyFogToolAtPoint(mapId, point) {
+  const mapState = getMapViewState(mapId);
+  const fogKey = getFogCellKey(point, mapState);
+  if (!fogKey || fogKey === mapState.lastFogCellKey || !mapState.fogTool) return false;
+  const fogCells = new Set(getMapFog(mapId));
+  const changed = mapState.fogTool === 'paint' ? !fogCells.has(fogKey) : fogCells.has(fogKey);
+  if (!changed) {
+    mapState.lastFogCellKey = fogKey;
+    return false;
+  }
+  if (mapState.fogTool === 'paint') fogCells.add(fogKey);
+  if (mapState.fogTool === 'erase') fogCells.delete(fogKey);
+  saveMapFog(mapId, [...fogCells]);
+  mapState.lastFogCellKey = fogKey;
+  drawMapOverlays(mapId);
+  return true;
+}
+
 function stagePointerDown(event, mapId) {
   const mapState = getMapViewState(mapId);
   if (event.target.closest('.token-node') || event.target.closest('.surface')) return;
@@ -1983,6 +2049,12 @@ function stagePointerDown(event, mapId) {
       mapState.dragObstacleStart = { point, obstacle: JSON.parse(JSON.stringify(hit)) };
     }
     render();
+    return;
+  }
+  if (state.role === 'dm' && mapState.fogTool) {
+    mapState.drawingFog = true;
+    mapState.lastFogCellKey = null;
+    applyFogToolAtPoint(mapId, point);
     return;
   }
   if (mapState.combatMoving && mapState.combatActive) {
@@ -2040,6 +2112,11 @@ function stagePointerMove(event, mapId) {
     drawMapOverlays(mapId);
     return;
   }
+  if (mapState.drawingFog && mapState.fogTool) {
+    const point = eventToScenePoint(event, mapId);
+    applyFogToolAtPoint(mapId, point);
+    return;
+  }
   if (mapState.isPanning) {
     mapState.panX = event.clientX - mapState.panStartX;
     mapState.panY = event.clientY - mapState.panStartY;
@@ -2069,6 +2146,8 @@ function stagePointerUp(mapId) {
   mapState.dragObstacleStart = null;
   mapState.drawObstacleStart = null;
   mapState.drawPreview = null;
+  mapState.drawingFog = false;
+  mapState.lastFogCellKey = null;
   render();
 }
 
