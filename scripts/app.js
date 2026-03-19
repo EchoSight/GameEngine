@@ -1985,6 +1985,10 @@ function stagePointerDown(event, mapId) {
     render();
     return;
   }
+  if (mapState.combatMoving && mapState.combatActive) {
+    moveCurrentCombatToken(mapId, event);
+    return;
+  }
   mapState.isPanning = true;
   mapState.panStartX = event.clientX - mapState.panX;
   mapState.panStartY = event.clientY - mapState.panY;
@@ -2088,6 +2092,12 @@ function tokenPointerDown(event, mapId, tokenId) {
 }
 
 function stageClick(event, mapId) {
+  const mapState = getMapViewState(mapId);
+  if (!mapState.combatMoving || !mapState.combatActive) return;
+  moveCurrentCombatToken(mapId, event);
+}
+
+function moveCurrentCombatToken(mapId, event) {
   const mapState = getMapViewState(mapId);
   if (!mapState.combatMoving || !mapState.combatActive) return;
   if (event.target.closest('.token-node') || event.target.closest('.surface')) return;
