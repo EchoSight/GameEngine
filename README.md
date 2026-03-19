@@ -1,6 +1,6 @@
 # Adventurista Toolbelt
 
-Adventurista Toolbelt is a static-ready React + Vite app for running tabletop RPG sessions in the browser. It keeps all campaign data in `localStorage`, so it can be hosted as plain static files on GitHub Pages without requiring a backend.
+Adventurista Toolbelt is now a no-build static React app that can be hosted directly on GitHub Pages or any other static file host. All campaign data stays in `localStorage`, so no backend is required.
 
 ## Features
 
@@ -11,26 +11,20 @@ Adventurista Toolbelt is a static-ready React + Vite app for running tabletop RP
 - Map uploads stored locally in the browser.
 - DM/player mode switching persisted in `localStorage`.
 
-## Local development
+## Local preview
+
+You do not need Vite or any bundler. Serve the repository root with any static file server, for example:
 
 ```sh
-npm install
-npm run dev
+python3 -m http.server 8080
 ```
 
-## Production build
+Then open `http://localhost:8080` in your browser.
 
-```sh
-npm run build
-npm run preview
-```
+## GitHub Pages deployment
 
-The app now uses hash-based routing and a relative Vite base path, so the generated `dist/` folder can be deployed directly to GitHub Pages or any other static host.
+1. Push the repository contents as-is.
+2. Configure GitHub Pages to serve from the branch/folder that contains `index.html`.
+3. Visit the published site URL.
 
-## Deploying to GitHub Pages
-
-1. Build the project with `npm run build`.
-2. Publish the contents of `dist/` to your GitHub Pages branch or artifact.
-3. Enable GitHub Pages for that branch in your repository settings.
-
-Because the app stores its data in the browser, each user keeps their own local characters, maps, and resources on their device.
+The app loads its JavaScript modules directly in the browser and uses CDN-hosted ESM packages plus Tailwind's browser runtime, so there is no build step to run before deploying.

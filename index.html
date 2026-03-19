@@ -5,21 +5,122 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Adventurista Toolbelt</title>
-  <meta name="description" content="Adventurista Toolbelt is a static-ready D&D companion for characters, maps, resources, and dice rolling." />
+  <meta name="description" content="Adventurista Toolbelt is a static-ready D&amp;D companion for characters, maps, resources, and dice rolling." />
   <meta name="author" content="OpenAI Codex" />
-
   <meta property="og:title" content="Adventurista Toolbelt" />
-  <meta property="og:description" content="A browser-based D&D campaign companion built for static hosting." />
+  <meta property="og:description" content="A browser-based D&amp;D campaign companion built for static hosting." />
   <meta property="og:type" content="website" />
-
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="Adventurista Toolbelt" />
-  <meta name="twitter:description" content="A browser-based D&D campaign companion built for static hosting." />
+  <meta name="twitter:description" content="A browser-based D&amp;D campaign companion built for static hosting." />
+  <script type="importmap">
+{
+  "imports": {
+    "@/": "./src/",
+    "react": "https://esm.sh/react@18.3.1",
+    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "react-router-dom": "https://esm.sh/react-router-dom@6.30.1",
+    "@tanstack/react-query": "https://esm.sh/@tanstack/react-query@5.83.0",
+    "framer-motion": "https://esm.sh/framer-motion@12.36.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.462.0",
+    "@radix-ui/": "https://esm.sh/@radix-ui/",
+    "class-variance-authority": "https://esm.sh/class-variance-authority@0.7.1",
+    "clsx": "https://esm.sh/clsx@2.1.1",
+    "cmdk": "https://esm.sh/cmdk@1.1.1",
+    "embla-carousel-react": "https://esm.sh/embla-carousel-react@8.6.0",
+    "input-otp": "https://esm.sh/input-otp@1.4.2",
+    "next-themes": "https://esm.sh/next-themes@0.3.0",
+    "react-day-picker": "https://esm.sh/react-day-picker@8.10.1",
+    "react-hook-form": "https://esm.sh/react-hook-form@7.61.1",
+    "react-resizable-panels": "https://esm.sh/react-resizable-panels@2.1.9",
+    "recharts": "https://esm.sh/recharts@2.15.4",
+    "sonner": "https://esm.sh/sonner@1.7.4",
+    "tailwind-merge": "https://esm.sh/tailwind-merge@2.6.0",
+    "vaul": "https://esm.sh/vaul@0.9.9"
+  }
+}
+  </script>
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = {
+      darkMode: ["class"],
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ["Geist Mono", "monospace"],
+            sans: ["Inter", "sans-serif"],
+          },
+          colors: {
+            border: "hsl(var(--border))",
+            input: "hsl(var(--input))",
+            ring: "hsl(var(--ring))",
+            background: "hsl(var(--background))",
+            foreground: "hsl(var(--foreground))",
+            primary: { DEFAULT: "hsl(var(--primary))", foreground: "hsl(var(--primary-foreground))" },
+            secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
+            destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
+            muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
+            accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
+            popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
+            card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+            tactical: {
+              red: "hsl(var(--tactical-red))",
+              blue: "hsl(var(--mana-blue))",
+              gold: "hsl(var(--xp-gold))",
+            },
+            sidebar: {
+              DEFAULT: "hsl(var(--sidebar-background))",
+              foreground: "hsl(var(--sidebar-foreground))",
+              primary: "hsl(var(--sidebar-primary))",
+              "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
+              accent: "hsl(var(--sidebar-accent))",
+              "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
+              border: "hsl(var(--sidebar-border))",
+              ring: "hsl(var(--sidebar-ring))",
+            },
+          },
+          borderRadius: {
+            lg: "var(--radius)",
+            md: "calc(var(--radius) - 1px)",
+            sm: "var(--radius)",
+          },
+          keyframes: {
+            "accordion-down": { from: { height: "0" }, to: { height: "var(--radix-accordion-content-height)" } },
+            "accordion-up": { from: { height: "var(--radix-accordion-content-height)" }, to: { height: "0" } },
+          },
+          animation: {
+            "accordion-down": "accordion-down 0.2s ease-out",
+            "accordion-up": "accordion-up 0.2s ease-out",
+          },
+        },
+      },
+    };
+
+    window.__tailwindReady = fetch('./src/index.css')
+      .then((response) => response.text())
+      .then((css) => {
+        const style = document.createElement('style');
+        style.type = 'text/tailwindcss';
+        style.textContent = css;
+        document.head.appendChild(style);
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.tailwindcss.com';
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      });
+  </script>
 </head>
 
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
+  <script type="module">
+    await window.__tailwindReady;
+    await import('./src/main.js');
+  </script>
 </body>
 
 </html>
